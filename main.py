@@ -14,7 +14,7 @@ from starlette.background import BackgroundTask
 
 app = FastAPI(
     title="Sani Downloader API",
-    version="1.1.0"
+    version="1.2.0",
 )
 
 app.add_middleware(
@@ -48,16 +48,28 @@ def validate_url(url: str) -> str:
     if parsed.scheme != "https":
         raise HTTPException(
             status_code=400,
-            detail="Gunakan tautan HTTPS."
+            detail="Gunakan tautan HTTPS.",
         )
 
     if (parsed.hostname or "").lower() not in ALLOWED_HOSTS:
         raise HTTPException(
             status_code=400,
-            detail="Domain belum didukung."
+            detail="Sani Downloader hanya mendukung tautan YouTube.",
         )
 
     return url
+
+
+def validate_format(file_format: str) -> str:
+    normalized = file_format.lower()
+
+    if normalized not in {"mp4", "mp3"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Pilih format MP4 atau MP3.",
+        )
+
+    return normalized
 
 
 @app.get("/")
@@ -65,7 +77,7 @@ def home():
     return {
         "status": "online",
         "app": "Sani Downloader API",
-        "message": "Backend berhasil dijalankan."
+        "message": "Backend berhasil dijalankan.",
     }
 
 
@@ -76,38 +88,28 @@ def health():
 
 @app.post("/check-url")
 def check_url(data: VideoRequest):
-    url = validate_url(str(data.url))
-
-    if data.format.lower() not in {"mp4", "mp3"}:
-        raise HTTPException(
-            status_code=400,
-            detail="Pilih format MP4 atau MP3."
-        )
+    validate_url(str(data.url))
+    file_format = validate_format(data.format)
 
     return {
         "valid": True,
         "message": "Format tautan diterima.",
-        "format": data.format.lower()
+        "format": file_format,
     }
 
 
 @app.post("/download")
 def download_video(data: VideoRequest):
     url = validate_url(str(data.url))
-    file_format = data.format.lower()
+    file_format = validate_format(data.format)
 
-    if file_format not in {"mp4", "mp3"}:
-        raise HTTPException(
-            status_code=400,
-            detail="Pilih format MP4 atau MP3."
-        )
-
-    # Folder sementara dibuat khusus untuk setiap permintaan.
     temp_dir = tempfile.mkdtemp(prefix="sani_dl_")
 
     try:
         options = {
-            "outtmpl": os.path.join(temp_dir, "%(title).100s.%(ext)s"),
+            "outtmpl": os.path.join(
+                temp_dir, "%(title).100s.%(ext)s"
+            ),
             "noplaylist": True,
             "restrictfilenames": True,
             "max_filesize": 500 * 1024 * 1024,
@@ -136,8 +138,11 @@ def download_video(data: VideoRequest):
             ydl.download([url])
 
         files = [
-            p for p in Path(temp_dir).iterdir()
-            if p.is_file() and p.suffix.lower() in {".mp4", ".mp3", ".webm", ".mkv"}
+            path
+            for path in Path(temp_dir).iterdir()
+            if path.is_file()
+            and path.suffix.lower()
+            in {".mp4", ".mp3", ".webm", ".mkv"}
         ]
 
         if not files:
@@ -145,7 +150,10 @@ def download_video(data: VideoRequest):
                 "Berkas hasil unduhan tidak ditemukan."
             )
 
-        output_file = max(files, key=lambda p: p.stat().st_size)
+        output_file = max(
+            files,
+            key=lambda path: path.stat().st_size,
+        )
 
         media_type = (
             "audio/mpeg"
@@ -158,20 +166,28 @@ def download_video(data: VideoRequest):
             media_type=media_type,
             filename=output_file.name,
             background=BackgroundTask(
-                shutil.rmtree, temp_dir, ignore_errors=True
+                shutil.rmtree,
+                temp_dir,
+                ignore_errors=True,
             ),
         )
 
-            except HTTPException:
+    except HTTPException:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
-    except Exception as e:
-        print(f"ERROR /download: {type(e).__name__}: {e}", flush=True)
+
+    except Exception as error:
+        print(
+            f"ERROR /download: {type(error).__name__}: {error}",
+            flush=True,
+        )
         shutil.rmtree(temp_dir, ignore_errors=True)
+
         raise HTTPException(
             status_code=500,
             detail=(
-                "Unduhan gagal diproses. Periksa log server "
-                "atau coba kembali nanti."
+                "Unduhan gagal diproses. Periksa log server. "
+                "Video mungkin memerlukan verifikasi YouTube, "
+                "FFmpeg, atau melebihi batas hosting."
             ),
-        )
+        ) from error
