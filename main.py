@@ -162,7 +162,10 @@ def download_video(data: VideoRequest):
             ),
         )
 
-        except Exception as e:
+            except HTTPException:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+    except Exception as e:
         print(f"ERROR /download: {type(e).__name__}: {e}", flush=True)
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(
