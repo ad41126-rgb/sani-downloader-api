@@ -162,15 +162,13 @@ def download_video(data: VideoRequest):
             ),
         )
 
-    except HTTPException:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise
-    except Exception:
+        except Exception as e:
+        print(f"ERROR /download: {type(e).__name__}: {e}", flush=True)
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(
             status_code=500,
             detail=(
-                "Unduhan gagal. Periksa tautan, ketersediaan video, "
-                "batas ukuran, dan dukungan FFmpeg."
+                "Unduhan gagal diproses. Periksa log server "
+                "atau coba kembali nanti."
             ),
         )
